@@ -24,7 +24,7 @@ class Preinscripcion extends Model
      * @var array<int, string>
      */
     protected $fillable = [
-            
+
         // Paso 1
         'tiene_dni',
         'tiene_certificado_estudios',
@@ -83,6 +83,13 @@ class Preinscripcion extends Model
         'identidad_etnica',
         'tiene_conadis',
         'lengua_materna',
+
+
+        // Control
+        'estado',
+        'puede_modificar',
+        'fecha_modificacion',
+
 
 
     ];

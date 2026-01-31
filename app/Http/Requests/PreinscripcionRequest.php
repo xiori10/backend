@@ -86,8 +86,27 @@ class PreinscripcionRequest extends FormRequest
 
 
             // Colegio
-            'nombre_colegio' => 'required|string|max:255',
-            'colegio_id' => 'nullable|string|max:30',
+            // 'nombre_colegio' => 'required|string|max:255',
+            // 'colegio_id' => 'nullable|string|max:30',
+
+            'nombre_colegio' => ['required', 'string', 'max:255'],
+
+            'nombre_colegio_manual' => [
+                'nullable',
+                'string',
+                'max:255',
+                function ($attribute, $value, $fail) {
+                    if (
+                        $this->input('nombre_colegio') === 'OTRO' &&
+                        empty(trim($value))
+                    ) {
+                        $fail('Debe ingresar el nombre del colegio.');
+                    }
+                },
+            ],
+
+
+
 
             // Paso 5: Información Adicional
             'escuela_profesional' => ['required', 'string', 'max:150'],

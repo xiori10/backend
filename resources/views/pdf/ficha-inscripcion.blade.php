@@ -31,6 +31,7 @@
 
 
 
+
         <table class="header-table">
             <tr>
                 <td class="header-logo-cell">
@@ -38,7 +39,7 @@
                 </td>
 
                 <td class="header-texto-cell">
-                    <h1> IESTP -MANUEL  NUÑEZ BUTRON - JULIACA</h1>
+                    <h1> IESTP -MANUEL NUÑEZ BUTRON - JULIACA</h1>
                     <h2>Dirección de Admisión</h2>
                     <h3>FICHA DE PREINSCRIPCIÓN</h3>
                     <p class="texto1">EXAMEN EXTRAORDINARIO 2026-I PRIMERA FASE</p>
@@ -249,7 +250,7 @@
             </tbody>
         </table>
 
-    
+
 
 
         <!--pasos para realizar el pago -->
@@ -304,8 +305,10 @@
                 <tr>
                     <td class="paso-numero">PASO 5</td>
                     <td class="paso-texto">
-                        Revisión de datos y finalización de la inscripción oficial. Recuerda traer: DNI original vigente y una copia
-                        simple. Certificado de estudios original y visado por la UGEL. Recibo de pago por derecho de inscripción
+                        Revisión de datos y finalización de la inscripción oficial. Recuerda traer: DNI original vigente
+                        y una copia
+                        simple. Certificado de estudios original y visado por la UGEL. Recibo de pago por derecho de
+                        inscripción
                     </td>
                 </tr>
 
@@ -322,7 +325,7 @@
 
 
 
-{{-- 
+        {{-- 
             <!-- Instrucciones -->
             <div class="instrucciones">
                 <h3>📋 PRÓXIMOS PASOS:</h3>

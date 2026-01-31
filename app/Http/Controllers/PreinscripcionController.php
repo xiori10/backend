@@ -52,6 +52,26 @@ class PreinscripcionController extends Controller
             // 1️⃣ Datos validados del formulario
             $data = $request->validated();
 
+            if (
+                    ($data['nombre_colegio'] ?? null) === 'OTRO' &&
+                    !empty($data['nombre_colegio_manual'])
+                ) {
+                    $data['nombre_colegio'] = mb_strtoupper(
+                        trim($data['nombre_colegio_manual']),
+                        'UTF-8'
+                    );
+                }
+
+                unset($data['nombre_colegio_manual']);
+
+
+                // ⭐ Si NO eligió OTRO pero colegio_id viene vacío (raro pero posible)
+                if (empty($data['colegio_id'])) {
+                    // Por seguridad garantizamos null
+                    $data['colegio_id'] = null;
+                }
+
+
             // 2️⃣ Completar nombres UBIGEO (solo si hay códigos)
             $this->completarNombresUbigeo($data);
 
