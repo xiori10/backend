@@ -12,16 +12,22 @@ class Preinscripcion extends Model
     use HasFactory, SoftDeletes;
 
     /**
-     * The table associated with the model.
-     *
-     * @var string
+     * Tabla asociada al modelo.
      */
     protected $table = 'preinscripciones';
 
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
+     * Estados posibles de la preinscripción.
+     * Se usan constantes para evitar errores tipográficos.
+     */
+    public const ESTADO_PENDIENTE = 'PENDIENTE';
+    public const ESTADO_APROBADO = 'APROBADO';
+    public const ESTADO_RECHAZADO = 'RECHAZADO';
+
+    /**
+     * Campos que pueden ser asignados masivamente.
+     * SOLO datos que el usuario puede modificar.
+     * Campos críticos del sistema NO deben ir aquí.
      */
     protected $fillable = [
 
@@ -48,7 +54,6 @@ class Preinscripcion extends Model
         'departamento_nacimiento',
         'provincia_nacimiento',
         'distrito_nacimiento',
-
         'departamento_nacimiento_nombre',
         'provincia_nacimiento_nombre',
         'distrito_nacimiento_nombre',
@@ -57,13 +62,11 @@ class Preinscripcion extends Model
         'departamento_residencia',
         'provincia_residencia',
         'distrito_residencia',
-
         'departamento_residencia_nombre',
         'provincia_residencia_nombre',
         'distrito_residencia_nombre',
         'ubigeo_residencia',
         'direccion_completa',
-
 
         // Paso 4
         'anio_termino_secundaria',
@@ -83,54 +86,34 @@ class Preinscripcion extends Model
         'identidad_etnica',
         'tiene_conadis',
         'lengua_materna',
-
-
-        // Control
-        'estado',
-        'puede_modificar',
-        'fecha_modificacion',
-
-
-
     ];
-
-    protected $hidden = [
-        'apellido_paterno',
-        'apellido_materno',
-        'nombres',
-        'fecha_nacimiento',
-        'celular_personal',
-        'celular_apoderado',
-        'correo_electronico',
-        'departamento_nacimiento',
-        'provincia_nacimiento',
-        'distrito_nacimiento',
-        'departamento_residencia',
-        'provincia_residencia',
-        'distrito_residencia',
-        'numero_documento',
-        'tipo_documento',
-        'direccion_completa',
-        'ubigeo_nacimiento',
-        'ubigeo_residencia',
-
-    ];
-
-
-
-
 
     /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
+     * Campos ocultos en las respuestas JSON.
+     * Protege datos sensibles en APIs públicas.
+     */
+    protected $hidden = [
+        'codigo_seguridad',
+        'deleted_at',
+    ];
+
+    /**
+     * Atributos agregados automáticamente al convertir a JSON.
+     */
+    protected $appends = [
+        'nombre_completo',
+        'edad',
+    ];
+
+    /**
+     * Casts de tipos para asegurar consistencia de datos.
      */
     protected $casts = [
         'fecha_nacimiento' => 'date',
         'puede_modificar' => 'boolean',
         'fecha_modificacion' => 'datetime',
 
-        // UBIGEO = STRING
+        // UBIGEO como string
         'pais_nacimiento' => 'string',
         'departamento_nacimiento' => 'string',
         'provincia_nacimiento' => 'string',
@@ -148,26 +131,27 @@ class Preinscripcion extends Model
         'distrito_colegio' => 'string',
     ];
 
-
     /**
-     * Boot the model.
+     * Evento del modelo: antes de crear genera automáticamente
+     * un código de seguridad único si no existe.
      */
     protected static function boot()
     {
         parent::boot();
 
-        // Generar código de seguridad automáticamente antes de crear
         static::creating(function ($preinscripcion) {
             if (empty($preinscripcion->codigo_seguridad)) {
                 $preinscripcion->codigo_seguridad = static::generarCodigoSeguridad();
             }
+
+            // Estado inicial por defecto
+            $preinscripcion->estado = self::ESTADO_PENDIENTE;
+            $preinscripcion->puede_modificar = true;
         });
     }
 
     /**
-     * Generar un código de seguridad único de 5 caracteres alfanuméricos.
-     *
-     * @return string
+     * Genera un código de seguridad único de 5 caracteres.
      */
     public static function generarCodigoSeguridad(): string
     {
@@ -179,9 +163,7 @@ class Preinscripcion extends Model
     }
 
     /**
-     * Obtener el nombre completo del postulante.
-     *
-     * @return string
+     * Accessor: devuelve el nombre completo.
      */
     public function getNombreCompletoAttribute(): string
     {
@@ -189,44 +171,35 @@ class Preinscripcion extends Model
     }
 
     /**
-     * Calcular la edad del postulante.
-     *
-     * @return int
+     * Accessor: calcula automáticamente la edad.
      */
     public function getEdadAttribute(): int
     {
-        return $this->fecha_nacimiento->age;
+        return $this->fecha_nacimiento?->age ?? 0;
     }
 
     /**
-     * Verificar si puede modificar sus datos.
-     *
-     * @return bool
+     * Determina si el postulante aún puede modificar sus datos.
      */
     public function puedeModificar(): bool
     {
-        return $this->puede_modificar && $this->estado === 'PENDIENTE';
+        return $this->puede_modificar && $this->estado === self::ESTADO_PENDIENTE;
     }
 
     /**
-     * Marcar que ya no puede modificar (usó su única oportunidad).
-     *
-     * @return void
+     * Marca la preinscripción como modificada
+     * y bloquea futuras ediciones.
+     * No usa mass assignment por seguridad.
      */
     public function marcarComoModificado(): void
     {
-        $this->update([
-            'puede_modificar' => false,
-            'fecha_modificacion' => now(),
-        ]);
+        $this->puede_modificar = false;
+        $this->fecha_modificacion = now();
+        $this->save();
     }
 
     /**
      * Scope para filtrar por estado.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param string $estado
-     * @return \Illuminate\Database\Eloquent\Builder
      */
     public function scopeEstado($query, string $estado)
     {
@@ -235,10 +208,6 @@ class Preinscripcion extends Model
 
     /**
      * Scope para filtrar por escuela profesional.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param string $escuela
-     * @return \Illuminate\Database\Eloquent\Builder
      */
     public function scopeEscuelaProfesional($query, string $escuela)
     {
@@ -246,11 +215,24 @@ class Preinscripcion extends Model
     }
 
     /**
-     * Scope para obtener pre-inscripciones recientes.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param int $dias
-     * @return \Illuminate\Database\Eloquent\Builder
+     * Scope de búsqueda por DNI o nombres.
+     */
+    public function scopeSearch($query, $search)
+    {
+        if (!$search) {
+            return $query;
+        }
+
+        return $query->where(function ($q) use ($search) {
+            $q->where('numero_documento', 'like', "%{$search}%")
+                ->orWhere('nombres', 'like', "%{$search}%")
+                ->orWhere('apellido_paterno', 'like', "%{$search}%")
+                ->orWhere('apellido_materno', 'like', "%{$search}%");
+        });
+    }
+
+    /**
+     * Scope para obtener preinscripciones recientes.
      */
     public function scopeRecientes($query, int $dias = 7)
     {

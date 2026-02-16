@@ -10,15 +10,44 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
-
+/**
+ * Controlador principal para la gestión de pre-inscripciones.
+ * 
+ * Funciones:
+ * - Listar pre-inscripciones con filtros y búsqueda
+ * - Registrar nueva pre-inscripción
+ * - Mostrar, actualizar y eliminar pre-inscripciones
+ * - Verificar código de seguridad / DNI
+ * - Generar PDFs de ficha de inscripción
+ * 
+ * Mejoras incluidas:
+ * - Validaciones más estrictas
+ * - Rate limiting sugerido para rutas críticas
+ * - Separación de lógica sensible (limpieza, UBIGEO)
+ * - Control de datos expuestos mediante arrays limpios
+ */
 class PreinscripcionController extends Controller
 {
     /**
-     * Listado
+     * 🔹 Listado de pre-inscripciones
+     * Aplica filtros de búsqueda, estado, escuela profesional y recientes
+     * Devuelve paginación
      */
     public function index(Request $request): JsonResponse
     {
+       
+
+        $request->validate([
+            'estado' => 'sometimes|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+            'per_page' => 'sometimes|integer|min:1|max:100',
+            'recientes' => 'sometimes|integer|min:1|max:365'
+        ]);
+
         $query = Preinscripcion::query();
+
+        if ($request->search) {
+            $query->search($request->search);
+        }
 
         if ($request->has('estado')) {
             $query->estado($request->estado);
@@ -34,80 +63,63 @@ class PreinscripcionController extends Controller
 
         return response()->json(
             $query->orderBy('created_at', 'desc')
-                ->paginate($request->input('per_page', 15))
+                  ->paginate($request->input('per_page', 15))
         );
     }
 
     /**
-     * Registrar
+     * 🔹 Registrar nueva pre-inscripción
+     * Valida datos, completa nombres de UBIGEO y realiza limpieza de campos
+     * Genera código de seguridad automáticamente (modelo)
+     * Envía correo de bienvenida (simulado)
      */
-
-
-   
-
     public function store(PreinscripcionRequest $request): JsonResponse
     {
-    
         try {
-            // 1️⃣ Datos validados del formulario
             $data = $request->validated();
 
-            if (
-                    ($data['nombre_colegio'] ?? null) === 'OTRO' &&
-                    !empty($data['nombre_colegio_manual'])
-                ) {
-                    $data['nombre_colegio'] = mb_strtoupper(
-                        trim($data['nombre_colegio_manual']),
-                        'UTF-8'
-                    );
-                }
+            // Si el colegio es "OTRO", usamos el campo manual
+            if (($data['nombre_colegio'] ?? null) === 'OTRO' && !empty($data['nombre_colegio_manual'])) {
+                $data['nombre_colegio'] = mb_strtoupper(trim($data['nombre_colegio_manual']), 'UTF-8');
+            }
+            unset($data['nombre_colegio_manual']);
 
-                unset($data['nombre_colegio_manual']);
+            $data['colegio_id'] = $data['colegio_id'] ?? null;
 
-
-                // ⭐ Si NO eligió OTRO pero colegio_id viene vacío (raro pero posible)
-                if (empty($data['colegio_id'])) {
-                    // Por seguridad garantizamos null
-                    $data['colegio_id'] = null;
-                }
-
-
-            // 2️⃣ Completar nombres UBIGEO (solo si hay códigos)
+            // Completa nombres UBIGEO según códigos
             $this->completarNombresUbigeo($data);
 
+            // Limpieza: quitar valores null o vacíos
+            $data = array_filter($data, fn($v) => $v !== null && $v !== '');
 
-            // 3️⃣ 🔥 LIMPIEZA CLAVE (AQUÍ VA)
-            $data = array_filter($data, fn ($v) => $v !== null && $v !== '');
-
-            // 4️⃣ Campos controlados por backend
+            // Campos controlados por backend
             $data['estado'] = 'PENDIENTE';
             $data['puede_modificar'] = true;
 
-      /** @var Preinscripcion $preinscripcion */
-                $preinscripcion = null;
+            /** @var Preinscripcion $preinscripcion */
 
-                DB::transaction(function () use (&$preinscripcion, $data) {
-                    $preinscripcion = Preinscripcion::create($data);
+            $preinscripcion = null;
 
-                    $preinscripcion->update([
-                        'departamento_nacimiento_nombre' => $data['departamento_nacimiento_nombre'] ?? null,
-                        'provincia_nacimiento_nombre'    => $data['provincia_nacimiento_nombre'] ?? null,
-                        'distrito_nacimiento_nombre'     => $data['distrito_nacimiento_nombre'] ?? null,
-                    ]);
-                });
+            DB::transaction(function () use (&$preinscripcion, $data) {
+                $preinscripcion = Preinscripcion::create($data);
 
+                // Asegurar que nombres UBIGEO estén guardados (no hace doble update si ya existen)
+                $preinscripcion->update([
+                    'departamento_nacimiento_nombre' => $data['departamento_nacimiento_nombre'] ?? null,
+                    'provincia_nacimiento_nombre'    => $data['provincia_nacimiento_nombre'] ?? null,
+                    'distrito_nacimiento_nombre'     => $data['distrito_nacimiento_nombre'] ?? null,
+                ]);
+            });
 
             $this->enviarCorreoBienvenida($preinscripcion);
 
             return response()->json([
                 'message' => 'Pre-inscripción registrada exitosamente',
                 'codigo_seguridad' => $preinscripcion->codigo_seguridad,
-                // 'data' => $preinscripcion,
             ], 201);
 
         } catch (\Throwable $e) {
             Log::error($e);
-
             return response()->json([
                 'message' => 'Error al registrar la pre-inscripción',
                 'error' => $e->getMessage(),
@@ -115,23 +127,33 @@ class PreinscripcionController extends Controller
         }
     }
 
-
     /**
-     * Mostrar por documento
+     * 🔹 Mostrar pre-inscripción por número de documento
+     * Devuelve solo datos esenciales
      */
     public function show(string $numeroDocumento): JsonResponse
+
     {
+        
         $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->first();
 
         if (!$preinscripcion) {
             return response()->json(['message' => 'No encontrado'], 404);
         }
 
-        return response()->json($preinscripcion);
+        // Limitar datos expuestos
+        $data = $preinscripcion->only([
+            'numero_documento', 'tipo_documento', 'nombres', 'apellido_paterno', 'apellido_materno',
+            'correo_electronico', 'celular_personal', 'celular_apoderado', 'estado', 'escuela_profesional'
+        ]);
+
+        return response()->json($data);
     }
 
     /**
-     * Actualizar
+     * 🔹 Actualizar pre-inscripción
+     * Verifica código de seguridad y si aún puede modificar
+     * Limpia datos y completa nombres UBIGEO
      */
     public function update(PreinscripcionRequest $request, string $numeroDocumento): JsonResponse
     {
@@ -150,23 +172,20 @@ class PreinscripcionController extends Controller
         }
 
         try {
-            $data = $request->except('codigo_seguridad');
+            // Solo actualizar campos permitidos
+            $data = $request->only($preinscripcion->getFillable());
+            $data = array_filter($data, fn($v) => $v !== null && $v !== '');
+            unset($data['codigo_seguridad'], $data['numero_documento'], $data['estado'], $data['puede_modificar'], $data['fecha_modificacion']);
 
-            // ✅ Volver a completar nombres UBIGEO
             $this->completarNombresUbigeo($data);
 
-            // 🧹 limpieza
-            $data = array_filter($data, fn ($v) => $v !== null && $v !== '');
-
             $preinscripcion->update($data);
-
-
 
             $preinscripcion->marcarComoModificado();
 
             return response()->json([
                 'message' => 'Actualizado correctamente',
-                'data' => $preinscripcion,
+                'data' => $preinscripcion
             ]);
 
         } catch (\Throwable $e) {
@@ -179,7 +198,34 @@ class PreinscripcionController extends Controller
     }
 
     /**
-     * Eliminar
+     * 🔹 Actualizar solo el estado de la pre-inscripción
+     * Validaciones estrictas de valores permitidos
+     * Requiere middleware auth para usuarios admin
+     */
+    public function actualizarEstado(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'estado' => 'required|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+        ]);
+
+        $preinscripcion = Preinscripcion::find($id);
+
+        if (!$preinscripcion) {
+            return response()->json(['message' => 'Preinscripción no encontrada'], 404);
+        }
+
+        $preinscripcion->estado = $request->estado;
+        $preinscripcion->save();
+
+        return response()->json([
+            'message' => 'Estado actualizado correctamente',
+            'data' => $preinscripcion
+        ]);
+    }
+
+    /**
+     * 🔹 Eliminar pre-inscripción
+     * Requiere middleware auth (solo admin)
      */
     public function destroy(string $numeroDocumento): JsonResponse
     {
@@ -195,7 +241,8 @@ class PreinscripcionController extends Controller
     }
 
     /**
-     * Verificar DNI
+     * 🔹 Verificar existencia de DNI
+     * Retorna si el documento ya está registrado
      */
     public function verificarDNI(Request $request): JsonResponse
     {
@@ -213,7 +260,8 @@ class PreinscripcionController extends Controller
     }
 
     /**
-     * Consultar para modificar
+     * 🔹 Consultar pre-inscripción para modificación
+     * Valida código de seguridad y devuelve datos esenciales + nombres UBIGEO
      */
     public function consultarParaModificar(Request $request): JsonResponse
     {
@@ -237,229 +285,124 @@ class PreinscripcionController extends Controller
     }
 
     /**
-     * PDF
+     * 🔹 Generar PDF de ficha de inscripción
      */
-
     public function imprimirFicha(string $numeroDocumento)
-        {
-            $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->firstOrFail();
+    {
+        $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->firstOrFail();
 
-            return Pdf::loadView('pdf.ficha-inscripcion', [
-                    'preinscripcion' => $preinscripcion,
-                    'version' => 'oficina',
-                ])
-                ->download("ficha_$numeroDocumento.pdf");
-        }
-
-
-        public function enviarFichaCorreo(string $numeroDocumento)
-        {
-            $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->firstOrFail();
-
-            $pdf = Pdf::loadView('pdf.ficha-inscripcion', [
-                'preinscripcion' => $preinscripcion,
-                'version' => 'correo',
-            ]);
-
-            // aquí luego lo adjuntas al mail
-            return $pdf->stream("ficha_$numeroDocumento.pdf");
-        }
-
-
+        return Pdf::loadView('pdf.ficha-inscripcion', [
+            'preinscripcion' => $preinscripcion,
+            'version' => 'oficina',
+        ])->download("ficha_$numeroDocumento.pdf");
+    }
 
     /**
-     * ===========================
-     * 🔹 MÉTODOS PRIVADOS
-     * ===========================
+     * 🔹 Enviar ficha de inscripción por correo (simulado)
      */
+    public function enviarFichaCorreo(string $numeroDocumento)
+    {
+        $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->firstOrFail();
 
+        $pdf = Pdf::loadView('pdf.ficha-inscripcion', [
+            'preinscripcion' => $preinscripcion,
+            'version' => 'correo',
+        ]);
 
-        private function completarNombresUbigeo(array &$data): void
-        {
-            $departamentos = cache()->rememberForever('ubigeo_departamentos', fn() =>
-                json_decode(file_get_contents(storage_path('app/public/ubigeos/departamentos.json')), true)
-            );
+        return $pdf->stream("ficha_$numeroDocumento.pdf");
+    }
 
-            $provincias = cache()->rememberForever('ubigeo_provincias', fn() =>
-                json_decode(file_get_contents(storage_path('app/public/ubigeos/provincias.json')), true)
-            );
+    /* =========================== MÉTODOS PRIVADOS =========================== */
 
-            $distritos = cache()->rememberForever('ubigeo_distritos', fn() =>
-                json_decode(file_get_contents(storage_path('app/public/ubigeos/distritos.json')), true)
-            );
+    /**
+     * 🔹 Completar nombres de UBIGEO según códigos enviados
+     */
+    private function completarNombresUbigeo(array &$data): void
+    {
+        $departamentos = cache()->rememberForever('ubigeo_departamentos', fn() =>
+            json_decode(file_get_contents(storage_path('app/public/ubigeos/departamentos.json')), true)
+        );
 
-            // ================= NACIMIENTO =================
-            if (!empty($data['departamento_nacimiento'])) {
+        $provincias = cache()->rememberForever('ubigeo_provincias', fn() =>
+            json_decode(file_get_contents(storage_path('app/public/ubigeos/provincias.json')), true)
+        );
 
-                $dep = $this->buscarDepartamento($departamentos, $data['departamento_nacimiento']);
+        $distritos = cache()->rememberForever('ubigeo_distritos', fn() =>
+            json_decode(file_get_contents(storage_path('app/public/ubigeos/distritos.json')), true)
+        );
 
-                if ($dep) {
-                    $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_nacimiento'] ?? null);
-
-                    if ($prov) {
-                        $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_nacimiento'] ?? null);
-
-                        $data['departamento_nacimiento_nombre'] = $dep['nombre_ubigeo'];
-                        $data['provincia_nacimiento_nombre']    = $prov['nombre_ubigeo'];
-                        $data['distrito_nacimiento_nombre']     = $dist['nombre_ubigeo'] ?? null;
-                    }
+        // NACIMIENTO
+        if (!empty($data['departamento_nacimiento'])) {
+            $dep = $this->buscarDepartamento($departamentos, $data['departamento_nacimiento']);
+            if ($dep) {
+                $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_nacimiento'] ?? null);
+                if ($prov) {
+                    $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_nacimiento'] ?? null);
+                    $data['departamento_nacimiento_nombre'] = $dep['nombre_ubigeo'];
+                    $data['provincia_nacimiento_nombre']    = $prov['nombre_ubigeo'];
+                    $data['distrito_nacimiento_nombre']     = $dist['nombre_ubigeo'] ?? null;
                 }
             }
-
-            // ================= RESIDENCIA =================
-            // if (!empty($data['departamento_residencia'])) {
-
-            //     $dep = $this->buscarDepartamento($departamentos, $data['departamento_residencia']);
-
-            //     if ($dep) {
-            //         $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_residencia'] ?? null);
-
-            //         if ($prov) {
-            //             $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_residencia'] ?? null);
-
-            //             $data['departamento_residencia_nombre'] = $dep['nombre_ubigeo'];
-            //             $data['provincia_residencia_nombre']    = $prov['nombre_ubigeo'];
-            //             $data['distrito_residencia_nombre']     = $dist['nombre_ubigeo'] ?? null;
-            //         }
-            //     }
-            // }
-
-
-            // ================= RESIDENCIA =================
-                // if (!empty($data['departamento_residencia'])) {
-
-                //     $dep = $this->buscarDepartamento($departamentos, $data['departamento_residencia']);
-
-                //     if ($dep) {
-                //         $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_residencia'] ?? null);
-
-                //         if ($prov) {
-                //             $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_residencia'] ?? null);
-
-                //             // 🔥 UBIGEO COMPLETO
-                //             if ($dist) {
-                //                 $data['ubigeo_residencia'] = $dist['id_ubigeo'];
-                //             }
-
-                //             $data['departamento_residencia_nombre'] = $dep['nombre_ubigeo'];
-                //             $data['provincia_residencia_nombre']    = $prov['nombre_ubigeo'];
-                //             $data['distrito_residencia_nombre']     = $dist['nombre_ubigeo'] ?? null;
-                //         }
-                //     }
-                // }
-
-
-
-
-                if (!empty($data['departamento_residencia'])) {
-
-                $dep = $this->buscarDepartamento($departamentos, $data['departamento_residencia']);
-
-                if ($dep) {
-                    $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_residencia'] ?? null);
-
-                    if ($prov) {
-                        $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_residencia'] ?? null);
-
-                        $data['departamento_residencia_nombre'] = $dep['nombre_ubigeo'];
-                        $data['provincia_residencia_nombre']    = $prov['nombre_ubigeo'] ?? null;
-                        $data['distrito_residencia_nombre']     = $dist['nombre_ubigeo'] ?? null;
-                    }
-                }
-            }
-
-
-
-                // ================= COLEGIO =================
-                if (!empty($data['departamento_colegio'])) {
-
-                    $dep = $this->buscarDepartamento($departamentos, $data['departamento_colegio']);
-
-                    if ($dep) {
-                        $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_colegio'] ?? null);
-
-                        if ($prov) {
-                            $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_colegio'] ?? null);
-
-                            $data['departamento_colegio_nombre'] = $dep['nombre_ubigeo'];
-                            $data['provincia_colegio_nombre']    = $prov['nombre_ubigeo'];
-                            $data['distrito_colegio_nombre']     = $dist['nombre_ubigeo'] ?? null;
-                        }
-                    }
-                }
         }
 
-
-
-
-        // se aumenta hoy
-
-        private function buscarDepartamento(array $departamentos, string $codigo): ?array
-        {
-            foreach ($departamentos as $dep) {
-                if ($dep['codigo_ubigeo'] === $codigo) {
-                    return $dep;
+        // RESIDENCIA
+        if (!empty($data['departamento_residencia'])) {
+            $dep = $this->buscarDepartamento($departamentos, $data['departamento_residencia']);
+            if ($dep) {
+                $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_residencia'] ?? null);
+                if ($prov) {
+                    $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_residencia'] ?? null);
+                    $data['departamento_residencia_nombre'] = $dep['nombre_ubigeo'];
+                    $data['provincia_residencia_nombre']    = $prov['nombre_ubigeo'] ?? null;
+                    $data['distrito_residencia_nombre']     = $dist['nombre_ubigeo'] ?? null;
                 }
             }
-            return null;
         }
 
-
-        private function buscarProvincia(array $provincias, string $departamentoId, string $codigo): ?array
-        {
-            if (!isset($provincias[$departamentoId])) {
-                return null;
-            }
-
-            foreach ($provincias[$departamentoId] as $prov) {
-                if ($prov['codigo_ubigeo'] === substr($codigo, -2)) {
-                    return $prov;
+        // COLEGIO
+        if (!empty($data['departamento_colegio'])) {
+            $dep = $this->buscarDepartamento($departamentos, $data['departamento_colegio']);
+            if ($dep) {
+                $prov = $this->buscarProvincia($provincias, $dep['id_ubigeo'], $data['provincia_colegio'] ?? null);
+                if ($prov) {
+                    $dist = $this->buscarDistrito($distritos, $prov['id_ubigeo'], $data['distrito_colegio'] ?? null);
+                    $data['departamento_colegio_nombre'] = $dep['nombre_ubigeo'];
+                    $data['provincia_colegio_nombre']    = $prov['nombre_ubigeo'];
+                    $data['distrito_colegio_nombre']     = $dist['nombre_ubigeo'] ?? null;
                 }
             }
-
-            return null;
         }
+    }
 
-
-        private function buscarDistrito(array $distritos, string $provinciaId, string $codigo): ?array
-            {
-                if (!isset($distritos[$provinciaId])) {
-                    return null;
-                }
-
-                foreach ($distritos[$provinciaId] as $dist) {
-                    if ($dist['codigo_ubigeo'] === substr($codigo, -2)) {
-                        return $dist;
-                    }
-                }
-
-                return null;
-            }
-
-
-
-        private function buscarDistritoNombre(array $distritos, ?string $idUbigeo): ?string
-        {
-            if (!$idUbigeo) return null;
-
-            foreach ($distritos as $lista) {
-                foreach ($lista as $d) {
-                    if (
-                        isset($d['id_ubigeo']) &&
-                        $d['id_ubigeo'] === $idUbigeo
-                    ) {
-                        return $d['nombre_ubigeo'] ?? null;
-                    }
-                }
-            }
-
-            return null;
+    private function buscarDepartamento(array $departamentos, string $codigo): ?array
+    {
+        foreach ($departamentos as $dep) {
+            if ($dep['codigo_ubigeo'] === $codigo) return $dep;
         }
+        return null;
+    }
 
+    private function buscarProvincia(array $provincias, string $departamentoId, string $codigo): ?array
+    {
+        if (!isset($provincias[$departamentoId])) return null;
+        foreach ($provincias[$departamentoId] as $prov) {
+            if ($prov['codigo_ubigeo'] === substr($codigo, -2)) return $prov;
+        }
+        return null;
+    }
 
+    private function buscarDistrito(array $distritos, string $provinciaId, string $codigo): ?array
+    {
+        if (!isset($distritos[$provinciaId])) return null;
+        foreach ($distritos[$provinciaId] as $dist) {
+            if ($dist['codigo_ubigeo'] === substr($codigo, -2)) return $dist;
+        }
+        return null;
+    }
 
-
-
+    /**
+     * 🔹 Resolver nombres UBIGEO para API response
+     */
     private function resolverUbigeoNombres(Preinscripcion $p): array
     {
         return [
@@ -472,6 +415,9 @@ class PreinscripcionController extends Controller
         ];
     }
 
+    /**
+     * 🔹 Enviar correo de bienvenida (simulado)
+     */
     private function enviarCorreoBienvenida(Preinscripcion $p): void
     {
         Log::info("Correo enviado a: {$p->correo_electronico}");

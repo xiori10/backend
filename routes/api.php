@@ -8,7 +8,8 @@ use App\Http\Controllers\UbigeoController;
 use App\Http\Controllers\ColegioController;
 use App\Http\Controllers\CaptchaController;
 use App\Http\Controllers\Auth\AdminAuthController;
-
+use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\ReporteController;
 /*
 |--------------------------------------------------------------------------
 | RUTAS PÚBLICAS
@@ -65,6 +66,10 @@ Route::prefix('admin')
     ->group(function () {
         Route::get('/me', [AdminAuthController::class, 'me']);
         Route::post('/logout', [AdminAuthController::class, 'logout']);
+        Route::get('/dashboard', [DashboardController::class, 'index']);
+        Route::get('/reportes', [ReporteController::class, 'index']);
+
+        Route::put('/preinscripciones/{id}/estado', [PreinscripcionController::class, 'actualizarEstado']);
 
         Route::get('/preinscripciones', [PreinscripcionController::class, 'index']);
         Route::delete('/preinscripciones/{numeroDocumento}', [PreinscripcionController::class, 'destroy']);
