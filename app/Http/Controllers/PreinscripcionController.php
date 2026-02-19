@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use App\Services\AuditService;
 
 /**
  * Controlador principal para la gestión de pre-inscripciones.
@@ -35,7 +36,12 @@ class PreinscripcionController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-       
+        // 🔥 Normalizar estado a MAYÚSCULAS
+        if ($request->has('estado')) {
+            $request->merge([
+                'estado' => strtoupper($request->estado)
+            ]);
+        }
 
         $request->validate([
             'estado' => 'sometimes|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
@@ -63,7 +69,7 @@ class PreinscripcionController extends Controller
 
         return response()->json(
             $query->orderBy('created_at', 'desc')
-                  ->paginate($request->input('per_page', 15))
+                ->paginate($request->input('per_page', 15))
         );
     }
 
@@ -117,7 +123,6 @@ class PreinscripcionController extends Controller
                 'message' => 'Pre-inscripción registrada exitosamente',
                 'codigo_seguridad' => $preinscripcion->codigo_seguridad,
             ], 201);
-
         } catch (\Throwable $e) {
             Log::error($e);
             return response()->json([
@@ -134,7 +139,7 @@ class PreinscripcionController extends Controller
     public function show(string $numeroDocumento): JsonResponse
 
     {
-        
+
         $preinscripcion = Preinscripcion::where('numero_documento', $numeroDocumento)->first();
 
         if (!$preinscripcion) {
@@ -143,8 +148,16 @@ class PreinscripcionController extends Controller
 
         // Limitar datos expuestos
         $data = $preinscripcion->only([
-            'numero_documento', 'tipo_documento', 'nombres', 'apellido_paterno', 'apellido_materno',
-            'correo_electronico', 'celular_personal', 'celular_apoderado', 'estado', 'escuela_profesional'
+            'numero_documento',
+            'tipo_documento',
+            'nombres',
+            'apellido_paterno',
+            'apellido_materno',
+            'correo_electronico',
+            'celular_personal',
+            'celular_apoderado',
+            'estado',
+            'escuela_profesional'
         ]);
 
         return response()->json($data);
@@ -187,7 +200,6 @@ class PreinscripcionController extends Controller
                 'message' => 'Actualizado correctamente',
                 'data' => $preinscripcion
             ]);
-
         } catch (\Throwable $e) {
             Log::error($e);
             return response()->json([
@@ -204,18 +216,48 @@ class PreinscripcionController extends Controller
      */
     public function actualizarEstado(Request $request, $id): JsonResponse
     {
-        $request->validate([
-            'estado' => 'required|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+
+        $request->merge([
+            'estado' => strtoupper($request->estado)
         ]);
 
-        $preinscripcion = Preinscripcion::find($id);
+        // $request->validate([
+        //     'estado' => 'required|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+        // ]);
+
+        $request->validate([
+            'estado' => 'required|in:' . implode(',', Preinscripcion::ESTADOS),
+        ]);
+
+
+        // $preinscripcion = Preinscripcion::find($id);
+        $preinscripcion = Preinscripcion::findOrFail($id);
+
 
         if (!$preinscripcion) {
             return response()->json(['message' => 'Preinscripción no encontrada'], 404);
         }
+        if (!$preinscripcion->puedeCambiarA($request->estado)) {
+            return response()->json([
+                'message' => 'No se puede cambiar del estado ' .
+                    $preinscripcion->estado .
+                    ' a ' .
+                    $request->estado
+            ], 422);
+        }
 
+
+        $estadoAnterior = $preinscripcion->estado;
         $preinscripcion->estado = $request->estado;
         $preinscripcion->save();
+
+        // 🔥 Auditoría
+        AuditService::log(
+            'actualizar_estado_preinscripcion',
+            'Cambió estado de preinscripción ID ' . $preinscripcion->id .
+                ' de ' . $estadoAnterior .
+                ' a ' . $request->estado
+        );
 
         return response()->json([
             'message' => 'Estado actualizado correctamente',
@@ -235,9 +277,50 @@ class PreinscripcionController extends Controller
             return response()->json(['message' => 'No encontrado'], 404);
         }
 
+        // Guardamos datos antes de eliminar
+        $id = $preinscripcion->id;
+        $documento = $preinscripcion->numero_documento;
+        $nombre = $preinscripcion->nombres ?? '';
+
         $preinscripcion->delete();
 
+        // 🔥 Auditoría
+        AuditService::log(
+            'eliminar_preinscripcion',
+            'Eliminó preinscripción ID ' . $id .
+                ' Documento: ' . $documento .
+                ' Nombre: ' . $nombre
+        );
+
         return response()->json(['message' => 'Eliminado']);
+    }
+
+    /** restaurar eliminado */
+
+    public function restore(string $numeroDocumento): JsonResponse
+    {
+        $preinscripcion = Preinscripcion::withTrashed()
+            ->where('numero_documento', $numeroDocumento)
+            ->first();
+
+        if (!$preinscripcion) {
+            return response()->json(['message' => 'No encontrado'], 404);
+        }
+
+        if (!$preinscripcion->trashed()) {
+            return response()->json(['message' => 'La preinscripción no está eliminada'], 400);
+        }
+
+        $preinscripcion->restore();
+
+        // 🔥 Auditoría
+        AuditService::log(
+            'restaurar_preinscripcion',
+            'Restauró preinscripción ID ' . $preinscripcion->id .
+                ' Documento: ' . $preinscripcion->numero_documento
+        );
+
+        return response()->json(['message' => 'Preinscripción restaurada']);
     }
 
     /**
@@ -319,15 +402,21 @@ class PreinscripcionController extends Controller
      */
     private function completarNombresUbigeo(array &$data): void
     {
-        $departamentos = cache()->rememberForever('ubigeo_departamentos', fn() =>
+        $departamentos = cache()->rememberForever(
+            'ubigeo_departamentos',
+            fn() =>
             json_decode(file_get_contents(storage_path('app/public/ubigeos/departamentos.json')), true)
         );
 
-        $provincias = cache()->rememberForever('ubigeo_provincias', fn() =>
+        $provincias = cache()->rememberForever(
+            'ubigeo_provincias',
+            fn() =>
             json_decode(file_get_contents(storage_path('app/public/ubigeos/provincias.json')), true)
         );
 
-        $distritos = cache()->rememberForever('ubigeo_distritos', fn() =>
+        $distritos = cache()->rememberForever(
+            'ubigeo_distritos',
+            fn() =>
             json_decode(file_get_contents(storage_path('app/public/ubigeos/distritos.json')), true)
         );
 

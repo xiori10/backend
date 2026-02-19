@@ -12,25 +12,71 @@ class Preinscripcion extends Model
     use HasFactory, SoftDeletes;
 
     /**
-     * Tabla asociada al modelo.
+     * ---------------------------------------------------------
+     * CONFIGURACIÓN BÁSICA DEL MODELO
+     * ---------------------------------------------------------
      */
+
+    // Tabla asociada en base de datos
     protected $table = 'preinscripciones';
 
+
     /**
-     * Estados posibles de la preinscripción.
-     * Se usan constantes para evitar errores tipográficos.
+     * ---------------------------------------------------------
+     * DEFINICIÓN DE ESTADOS (FUENTE ÚNICA DE VERDAD)
+     * ---------------------------------------------------------
+     * Aquí se definen todos los estados posibles del sistema.
+     * Si mañana agregas PAGADO, solo lo agregas aquí.
      */
+
+    // Estado inicial cuando el alumno se registra
     public const ESTADO_PENDIENTE = 'PENDIENTE';
-    public const ESTADO_APROBADO = 'APROBADO';
+
+    // Estado cuando el admin aprueba manualmente
+    public const ESTADO_INSCRITO = 'INSCRITO';
+
+    // Estado cuando el admin rechaza la solicitud
     public const ESTADO_RECHAZADO = 'RECHAZADO';
 
     /**
-     * Campos que pueden ser asignados masivamente.
-     * SOLO datos que el usuario puede modificar.
+     * Lista oficial de estados válidos.
+     * Se usa en validaciones del controlador.
+     */
+    public const ESTADOS = [
+        self::ESTADO_PENDIENTE,
+        self::ESTADO_INSCRITO,
+        self::ESTADO_RECHAZADO,
+    ];
+
+    /**
+     * ---------------------------------------------------------
+     * TRANSICIONES PERMITIDAS ENTRE ESTADOS
+     * ---------------------------------------------------------
+     * Define qué estados pueden cambiar a otros.
+     * Esto blinda la lógica del negocio.
+     */
+    public const TRANSICIONES = [
+
+        // Desde PENDIENTE se puede aprobar o rechazar
+        self::ESTADO_PENDIENTE => [
+            self::ESTADO_INSCRITO,
+            self::ESTADO_RECHAZADO,
+        ],
+
+        // Estados finales no pueden cambiar
+        self::ESTADO_INSCRITO => [],
+        self::ESTADO_RECHAZADO => [],
+    ];
+
+
+    /**
+     * ---------------------------------------------------------
+     * MASS ASSIGNMENT
+     * ---------------------------------------------------------
+     * Solo campos que el usuario puede modificar.
      * Campos críticos del sistema NO deben ir aquí.
      */
     protected $fillable = [
-
         // Paso 1
         'tiene_dni',
         'tiene_certificado_estudios',
@@ -88,32 +134,33 @@ class Preinscripcion extends Model
         'lengua_materna',
     ];
 
+
     /**
-     * Campos ocultos en las respuestas JSON.
-     * Protege datos sensibles en APIs públicas.
+     * Campos ocultos en respuestas JSON
      */
     protected $hidden = [
         'codigo_seguridad',
         'deleted_at',
     ];
 
+
     /**
-     * Atributos agregados automáticamente al convertir a JSON.
+     * Atributos calculados automáticamente
      */
     protected $appends = [
         'nombre_completo',
         'edad',
     ];
 
+
     /**
-     * Casts de tipos para asegurar consistencia de datos.
+     * Conversión automática de tipos
      */
     protected $casts = [
         'fecha_nacimiento' => 'date',
         'puede_modificar' => 'boolean',
         'fecha_modificacion' => 'datetime',
 
-        // UBIGEO como string
         'pais_nacimiento' => 'string',
         'departamento_nacimiento' => 'string',
         'provincia_nacimiento' => 'string',
@@ -131,27 +178,35 @@ class Preinscripcion extends Model
         'distrito_colegio' => 'string',
     ];
 
+
     /**
-     * Evento del modelo: antes de crear genera automáticamente
-     * un código de seguridad único si no existe.
+     * ---------------------------------------------------------
+     * EVENTOS DEL MODELO
+     * ---------------------------------------------------------
+     * Se ejecuta automáticamente antes de crear el registro.
      */
     protected static function boot()
     {
         parent::boot();
 
         static::creating(function ($preinscripcion) {
+
+            // Genera código único si no existe
             if (empty($preinscripcion->codigo_seguridad)) {
                 $preinscripcion->codigo_seguridad = static::generarCodigoSeguridad();
             }
 
-            // Estado inicial por defecto
+            // Estado inicial obligatorio
             $preinscripcion->estado = self::ESTADO_PENDIENTE;
+
+            // Permitir edición mientras esté pendiente
             $preinscripcion->puede_modificar = true;
         });
     }
 
+
     /**
-     * Genera un código de seguridad único de 5 caracteres.
+     * Genera un código de seguridad único
      */
     public static function generarCodigoSeguridad(): string
     {
@@ -162,34 +217,37 @@ class Preinscripcion extends Model
         return $codigo;
     }
 
+
     /**
-     * Accessor: devuelve el nombre completo.
+     * Accessor: Devuelve nombre completo
      */
     public function getNombreCompletoAttribute(): string
     {
         return "{$this->nombres} {$this->apellido_paterno} {$this->apellido_materno}";
     }
 
+
     /**
-     * Accessor: calcula automáticamente la edad.
+     * Accessor: Calcula edad automáticamente
      */
     public function getEdadAttribute(): int
     {
         return $this->fecha_nacimiento?->age ?? 0;
     }
 
+
     /**
-     * Determina si el postulante aún puede modificar sus datos.
+     * Determina si puede modificar datos
+     * Solo permitido si está PENDIENTE
      */
     public function puedeModificar(): bool
     {
         return $this->puede_modificar && $this->estado === self::ESTADO_PENDIENTE;
     }
 
+
     /**
-     * Marca la preinscripción como modificada
-     * y bloquea futuras ediciones.
-     * No usa mass assignment por seguridad.
+     * Bloquea futuras ediciones
      */
     public function marcarComoModificado(): void
     {
@@ -198,30 +256,31 @@ class Preinscripcion extends Model
         $this->save();
     }
 
+
     /**
-     * Scope para filtrar por estado.
+     * Scope para filtrar por estado
      */
     public function scopeEstado($query, string $estado)
     {
         return $query->where('estado', $estado);
     }
 
+
     /**
-     * Scope para filtrar por escuela profesional.
+     * Scope para filtrar por escuela profesional
      */
     public function scopeEscuelaProfesional($query, string $escuela)
     {
         return $query->where('escuela_profesional', $escuela);
     }
 
+
     /**
-     * Scope de búsqueda por DNI o nombres.
+     * Scope para búsqueda por DNI o nombres
      */
     public function scopeSearch($query, $search)
     {
-        if (!$search) {
-            return $query;
-        }
+        if (!$search) return $query;
 
         return $query->where(function ($q) use ($search) {
             $q->where('numero_documento', 'like', "%{$search}%")
@@ -231,11 +290,35 @@ class Preinscripcion extends Model
         });
     }
 
+
     /**
-     * Scope para obtener preinscripciones recientes.
+     * Scope para registros recientes
      */
     public function scopeRecientes($query, int $dias = 7)
     {
         return $query->where('created_at', '>=', now()->subDays($dias));
+    }
+
+
+    /**
+     * Verifica si puede cambiar al nuevo estado
+     * Usa la matriz TRANSICIONES
+     */
+    public function puedeCambiarA(string $nuevoEstado): bool
+    {
+        return in_array(
+            $nuevoEstado,
+            self::TRANSICIONES[$this->estado] ?? []
+        );
+    }
+
+
+    /**
+     * Determina si el estado es final
+     * (Preparado para futuro con más estados)
+     */
+    public function esEstadoFinal(): bool
+    {
+        return empty(self::TRANSICIONES[$this->estado]);
     }
 }

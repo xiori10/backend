@@ -10,6 +10,10 @@ use App\Http\Controllers\CaptchaController;
 use App\Http\Controllers\Auth\AdminAuthController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\ReporteController;
+use App\Http\Controllers\Admin\AdminUserController;
+use App\Http\Controllers\Admin\AdminSecurityController;
+use App\Http\Controllers\Admin\SeguridadController;
+
 /*
 |--------------------------------------------------------------------------
 | RUTAS PÚBLICAS
@@ -73,4 +77,22 @@ Route::prefix('admin')
 
         Route::get('/preinscripciones', [PreinscripcionController::class, 'index']);
         Route::delete('/preinscripciones/{numeroDocumento}', [PreinscripcionController::class, 'destroy']);
+
+        // 🔥 NUEVO MÓDULO USUARIOS
+        Route::get('/usuarios', [AdminUserController::class, 'index']);
+        Route::post('/usuarios', [AdminUserController::class, 'store']);
+        Route::put('/usuarios/{id}', [AdminUserController::class, 'update']);
+        Route::delete('/usuarios/{id}', [AdminUserController::class, 'destroy']);
+
+
+        Route::post('/preinscripciones/{numeroDocumento}/restore', [PreinscripcionController::class, 'restore']);
+
+        // Route::get('/login-attempts', [AdminSecurityController::class, 'loginAttempts']);
+
+        Route::get('/login-attempts', [SeguridadController::class, 'loginAttempts']);
+        Route::get('/sesiones', [SeguridadController::class, 'sesiones']);
+        Route::delete('/sesiones/{id}', [SeguridadController::class, 'cerrarSesion']);
+
+        Route::get('/configuracion', [SeguridadController::class, 'configuracion']);
+        Route::put('/configuracion', [SeguridadController::class, 'actualizarConfiguracion']);
     });

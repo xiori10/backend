@@ -39,4 +39,9 @@ class User extends Authenticatable
     {
         return $this->role === UserRole::USER;
     }
+
+    public function sessions()
+    {
+        return $this->hasMany(\App\Models\UserSession::class);
+    }
 }

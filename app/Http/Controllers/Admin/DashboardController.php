@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Preinscripcion;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
 
 class DashboardController extends Controller
 {
@@ -22,6 +23,8 @@ class DashboardController extends Controller
             'por_escuela' => Preinscripcion::select('escuela_profesional', DB::raw('count(*) as total'))
                 ->groupBy('escuela_profesional')
                 ->get(),
+
+            'usuarios' => User::count(),
 
             'por_mes' => Preinscripcion::select(
                     DB::raw('MONTH(created_at) as mes'),
