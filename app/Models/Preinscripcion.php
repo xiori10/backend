@@ -132,6 +132,9 @@ class Preinscripcion extends Model
         'identidad_etnica',
         'tiene_conadis',
         'lengua_materna',
+
+        // estado de rechazo
+        'motivo_rechazo',
     ];
 
 

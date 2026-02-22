@@ -75,6 +75,8 @@ Route::prefix('admin')
 
         Route::put('/preinscripciones/{id}/estado', [PreinscripcionController::class, 'actualizarEstado']);
 
+        Route::get('/preinscripciones/{id}', [PreinscripcionController::class, 'showAdmin']);
+
         Route::get('/preinscripciones', [PreinscripcionController::class, 'index']);
         Route::delete('/preinscripciones/{numeroDocumento}', [PreinscripcionController::class, 'destroy']);
 
@@ -95,4 +97,17 @@ Route::prefix('admin')
 
         Route::get('/configuracion', [SeguridadController::class, 'configuracion']);
         Route::put('/configuracion', [SeguridadController::class, 'actualizarConfiguracion']);
+
+        Route::get('/logs', [SeguridadController::class, 'logs']);
+        Route::get('/logs/users', [SeguridadController::class, 'users']);
+        Route::get('/logs/actions', [SeguridadController::class, 'actions']);
+
+        // Route::get('{numeroDocumento}/pdf', [PreinscripcionController::class, 'generatePDF']);
+        // Route::get('/preinscripciones/{numeroDocumento}/pdf', [PreinscripcionController::class, 'generatePDF']);
+        // Route::get('/preinscripciones/{id}/pdf', [PreinscripcionController::class, 'generatePDF']);
+        // Route::get('/preinscripciones/{numeroDocumento}/pdf', [PreinscripcionController::class, 'generatePDF']);
+
+
+
+
     });

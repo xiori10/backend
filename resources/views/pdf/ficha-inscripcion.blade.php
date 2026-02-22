@@ -219,11 +219,18 @@
                         {{ $preinscripcion->distrito_colegio_nombre }}
                     </td>
                 </tr>
+
+                <tr>
+                    <td class="label-cell">Año de término de secundaria</td>
+                    <td class="value-cell">{{ $preinscripcion->anio_termino_secundaria ?? 'Ninguno' }}</td>
+                </tr>
                 <tr>
                     <td class="label-cell">Gestión dependencia</td>
                     <td class="value-cell">{{ $preinscripcion->gestion_dependencia ?? 'Pública - Sector Educación' }}
                     </td>
                 </tr>
+
+            
             </tbody>
         </table>
 

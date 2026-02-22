@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use App\Services\AuditService;
 
+
 /**
  * Controlador principal para la gestión de pre-inscripciones.
  * 
@@ -44,7 +45,8 @@ class PreinscripcionController extends Controller
         }
 
         $request->validate([
-            'estado' => 'sometimes|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+            // 'estado' => 'sometimes|in:PENDIENTE,PAGADO,INSCRITO,RECHAZADO',
+            'estado' => 'sometimes|in:' . implode(',', Preinscripcion::ESTADOS),
             'per_page' => 'sometimes|integer|min:1|max:100',
             'recientes' => 'sometimes|integer|min:1|max:365'
         ]);
@@ -163,6 +165,25 @@ class PreinscripcionController extends Controller
         return response()->json($data);
     }
 
+
+    // ver completo datos de una preinscripcion
+    public function showAdmin($id): JsonResponse
+    {
+        $preinscripcion = Preinscripcion::find($id);
+
+        if (!$preinscripcion) {
+            return response()->json([
+                'message' => 'Preinscripción no encontrada'
+            ], 404);
+        }
+
+        return response()->json($preinscripcion);
+    }
+
+
+
+
+
     /**
      * 🔹 Actualizar pre-inscripción
      * Verifica código de seguridad y si aún puede modificar
@@ -227,6 +248,8 @@ class PreinscripcionController extends Controller
 
         $request->validate([
             'estado' => 'required|in:' . implode(',', Preinscripcion::ESTADOS),
+            'motivo' => 'required_if:estado,RECHAZADO|string|max:500'
+
         ]);
 
 
@@ -234,9 +257,9 @@ class PreinscripcionController extends Controller
         $preinscripcion = Preinscripcion::findOrFail($id);
 
 
-        if (!$preinscripcion) {
-            return response()->json(['message' => 'Preinscripción no encontrada'], 404);
-        }
+        // if (!$preinscripcion) {
+        //     return response()->json(['message' => 'Preinscripción no encontrada'], 404);
+        // }
         if (!$preinscripcion->puedeCambiarA($request->estado)) {
             return response()->json([
                 'message' => 'No se puede cambiar del estado ' .
@@ -249,6 +272,15 @@ class PreinscripcionController extends Controller
 
         $estadoAnterior = $preinscripcion->estado;
         $preinscripcion->estado = $request->estado;
+
+        // si es rechazado, guardamos motivo
+        
+        if ($request->estado === Preinscripcion::ESTADO_RECHAZADO) {
+            $preinscripcion->motivo_rechazo = $request->motivo;
+        } else {
+            // 🔥 Limpia el motivo si cambia a otro estado
+            $preinscripcion->motivo_rechazo = null;
+        }
         $preinscripcion->save();
 
         // 🔥 Auditoría
@@ -503,6 +535,8 @@ class PreinscripcionController extends Controller
             'distrito_residencia_nombre'     => $p->distrito_residencia_nombre,
         ];
     }
+
+
 
     /**
      * 🔹 Enviar correo de bienvenida (simulado)
